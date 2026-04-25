@@ -1,2 +1,10 @@
 spring.application.name=Multi-Agent Orchestration
+
+# Claude API Configuration
 claude.api.key=your-claude-api-key-here
+claude.api.model=claude-sonnet-4-20250514
+claude.api.version=2023-06-01
+claude.api.max-tokens=4000
+
+# Research Coordinator Configuration
+research.coordinator.max-iterations=3

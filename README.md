@@ -1,20 +1,21 @@
-# Multi-Agent Research Coordinator — Java Spring Boot
+# Multi-Agent Orchestration — Java Spring Boot
 
-A Java Spring Boot implementation of a Hub-and-Spoke multi-agent orchestration system using the Anthropic Claude API.
+A Java Spring Boot implementation of Hub-and-Spoke multi-agent orchestration with structured metadata context passing using the Anthropic Claude API.
 Built as part of the **Claude Certified Architect — Foundations** exam preparation.
 
 ---
 
 ## What This Project Demonstrates
 
-This project implements the core multi-agent orchestration patterns tested in **Domain 1 (27%)** of the Claude Certified Architect exam:
+This project implements core multi-agent orchestration patterns tested in **Domain 1 (27%)** of the Claude Certified Architect exam:
 
-- Hub-and-spoke architecture — all communication flows through the coordinator
+- Hub-and-spoke architecture — all communication flows through coordinator
 - Subagent isolation — every piece of context explicitly passed, no shared memory
 - Broad task decomposition — avoids narrow decomposition failure pattern
 - Parallel subagent spawning — independent agents run simultaneously
 - Iterative refinement loop — coordinator detects and fills coverage gaps
-- Targeted re-delegation — only missing subtopics re-researched, not full restart
+- Structured metadata — separates content from source attribution
+- Attribution preservation — full Finding metadata passed through entire pipeline
 
 ---
 
@@ -23,10 +24,10 @@ This project implements the core multi-agent orchestration patterns tested in **
 ```
 User Input: "Research renewable energy technologies"
                     ↓
-         ResearchCoordinator (Hub)
+           CoordinatorAgent (Hub)
                     ↓
-         taskDecomposition()
-         ["solar", "wind", "geothermal", "tidal", "biomass", "fusion"]
+           taskDecomposition()
+    ["solar", "wind", "geothermal", "tidal", "biomass", "fusion"]
                     ↓
     ┌───────────────┼───────────────┐
     ↓               ↓               ↓
@@ -34,9 +35,13 @@ subtopic1       subtopic2       subtopic3      (all parallel)
 web+doc         web+doc         web+doc
     └───────────────┼───────────────┘
                     ↓
-            synthesisAgent()
+           List<Finding> allFindings
+           (with full metadata preserved)
                     ↓
-            evaluateCoverage()
+           SynthesisAgent
+           (cites every claim with source_url + page_number)
+                    ↓
+           evaluateCoverage()
                     ↓
          ┌──────────────────────┐
          │  coverageComplete?   │
@@ -53,60 +58,116 @@ web+doc         web+doc         web+doc
 ```
 src/main/java/org/example/multiagentorchestration/
 ├── model/
-│   └── Message.java                    # Message POJO with role and content
+│   ├── Message.java                    # Message POJO with role and content
+│   └── Finding.java                    # Structured finding with metadata
+├── agentService/
+│   ├── CoordinatorAgent.java           # Hub - orchestrates all agents
+│   ├── WebSearchAgent.java             # Spoke 1 - web research
+│   ├── DocumentAnalysisAgent.java      # Spoke 2 - document analysis
+│   └── SynthesisAgent.java             # Spoke 3 - synthesizes findings
 ├── service/
-│   ├── ClaudeApiService.java           # Claude API client, HTTP calls
-│   └── ResearchCoordinatorService.java # Hub + all spokes + refinement loop
+│   └── ClaudeApiService.java           # Claude API client
 ├── AgentRunner.java                    # CommandLineRunner entry point
 └── resources/
-    └── application.properties          # API key configuration
+    └── application.properties          # API key + configuration
 ```
 
 ---
 
-## Key Components
+## Finding — Structured Metadata Model
 
-### Hub — ResearchCoordinator
-The central orchestrator that:
-1. Decomposes the topic into 5+ subtopics using Claude
-2. Spawns all subagents in parallel
-3. Aggregates results and evaluates coverage
-4. Re-delegates only missing subtopics if gaps found
-5. Returns final comprehensive report
-
-### Spokes — Subagents
-Each subagent is isolated with its own focused system prompt:
-
-| Subagent | Role | Focus |
-|---|---|---|
-| `webSearchAgent` | Web research specialist | Recent facts, statistics, developments |
-| `documentAnalysisAgent` | Document analysis expert | Deep analysis, technical details |
-| `synthesisAgent` | Research synthesis specialist | Combines all results into final report |
-
----
-
-## Subagent Isolation — Critical Pattern
-
-Subagents have **no shared memory** and **no inherited context**.
-Every piece of information they need must be explicitly passed in their prompt.
+The core of this exercise — separating content from source attribution:
 
 ```java
-// WRONG - subagent has no context
-private String synthesisAgent(String topic) {
-    return claudeApiService.sendSimpleMessage(systemPrompt, topic);
-}
+public class Finding {
 
-// CORRECT - all context explicitly passed
-private String synthesisAgent(String webResults, String docResults, String topic) {
-    String userMessage = """
-            Topic: %s
-            Web Research Results: %s
-            Document Analysis Results: %s
-            Please synthesize these into a comprehensive report.
-            """.formatted(topic, webResults, docResults);
-    return claudeApiService.sendSimpleMessage(systemPrompt, userMessage);
+    public enum Confidence { HIGH, MEDIUM, LOW }
+
+    @JsonProperty("claim")
+    private String claim;           // the actual content
+
+    @JsonProperty("source_url")
+    private String sourceUrl;       // where it came from
+
+    @JsonProperty("document_name")
+    private String documentName;    // document title
+
+    @JsonProperty("page_number")
+    private Integer pageNumber;     // page reference
+
+    @JsonProperty("confidence")
+    private Confidence confidence;  // HIGH, MEDIUM, LOW
+
+    @JsonProperty("retrieved_by")
+    private String retrievedBy;     // which agent found it
 }
 ```
+
+---
+
+## Agent Definitions
+
+Each agent has a clear definition with name, description, system prompt and allowed tools:
+
+### CoordinatorAgent (Hub)
+```java
+NAME = "coordinator_agent"
+DESCRIPTION = "Orchestrates research by delegating to specialized subagents"
+ALLOWED_TOOLS = ["web_search_agent", "document_analysis_agent", "synthesis_agent"]
+```
+
+### WebSearchAgent (Spoke 1)
+```java
+NAME = "web_search_agent"
+DESCRIPTION = "Web Search the given Topic"
+SYSTEM_PROMPT = "You are a web research agent...
+                 Return ONLY a JSON array of findings...
+                 retrieved_by must always be 'web_search_agent'"
+```
+
+### DocumentAnalysisAgent (Spoke 2)
+```java
+NAME = "document_analysis_agent"
+DESCRIPTION = "Analysis the Given Topic"
+SYSTEM_PROMPT = "You are a document analysis expert...
+                 Return ONLY a JSON array of findings...
+                 retrieved_by must always be 'document_analysis_agent'"
+```
+
+### SynthesisAgent (Spoke 3)
+```java
+NAME = "synthesis_agent"
+DESCRIPTION = "Research synthesis specialist"
+SYSTEM_PROMPT = "...IMPORTANT: Every claim MUST include citation 
+                 with source_url and page_number.
+                 Never make unsourced claims."
+```
+
+---
+
+## Context Passing — Critical Pattern
+
+### Attribution Failure Pattern (WRONG)
+```java
+// strips metadata — synthesis agent cannot cite sources
+private String execute(String webResults, String docResults, String topic)
+```
+
+### Correct Pattern — Preserve Full Metadata
+```java
+// passes complete structured findings — attribution preserved
+public String execute(List<Finding> allFindings, String topic)
+
+// coordinator collects ALL findings with metadata intact
+List<Finding> allFindings = new ArrayList<>();
+webFutures.forEach(f -> allFindings.addAll(f.join()));
+docFutures.forEach(f -> allFindings.addAll(f.join()));
+
+// synthesis receives full metadata
+return synthesisAgent.execute(allFindings, topic);
+```
+
+**Exam rule:** If synthesis agent produces unsourced claims, trace back to whether metadata was passed — do not blame the synthesis agent prompt.
 
 ---
 
@@ -115,25 +176,19 @@ private String synthesisAgent(String webResults, String docResults, String topic
 All subtopics run simultaneously using `CompletableFuture`:
 
 ```java
-// spawn ALL subtopics in parallel
-List<CompletableFuture<String>> webFutures = subTopics.stream()
-        .map(t -> CompletableFuture.supplyAsync(() -> webSearchAgent(t)))
-        .collect(Collectors.toList());
+List<CompletableFuture<List<Finding>>> webFutures = subTopics.stream()
+        .map(t -> CompletableFuture.supplyAsync(() -> webSearchAgent.execute(t)))
+        .toList();
 
-List<CompletableFuture<String>> docFutures = subTopics.stream()
-        .map(t -> CompletableFuture.supplyAsync(() -> documentAnalysisAgent(t)))
-        .collect(Collectors.toList());
+List<CompletableFuture<List<Finding>>> docFutures = subTopics.stream()
+        .map(t -> CompletableFuture.supplyAsync(() -> documentAnalysisAgent.execute(t)))
+        .toList();
 
-// wait for ALL to complete
 CompletableFuture.allOf(
         Stream.concat(webFutures.stream(), docFutures.stream())
                 .toArray(CompletableFuture[]::new)
 ).join();
 ```
-
-**Why parallel matters:**
-- Sequential: subtopic1 → wait → subtopic2 → wait → subtopic3
-- Parallel: subtopic1 + subtopic2 + subtopic3 → all simultaneously → much faster
 
 ---
 
@@ -142,59 +197,49 @@ CompletableFuture.allOf(
 ```java
 while (iteration < maxIterations) {
     String coverageJson = evaluateCoverage(report, subTopics);
-    
-    if (coverageComplete) {
-        break; // sufficient coverage achieved
-    }
-    
+
+    if (coverageComplete) break;
+
     // re-delegate ONLY missing subtopics
     List<String> missingTopics = coverageMap.get("missing");
     String missingReport = runAgentsAndSynthesis(missingTopics, topic);
     report = report + "\n\n" + missingReport;
-    
+
     iteration++;
 }
 ```
 
-**Key exam concept:** Re-delegate only missing subtopics — not full restart.
-Targeted refinement is more efficient and avoids duplicate coverage.
+---
+
+## Key Exam Concepts
+
+### allowedTools — Binary Requirement
+In Claude Agent SDK, `Agent/Task` must be in `allowedTools` for coordinator to spawn subagents. Without it, spawning fails at SDK level. In Java, `@Autowired` enforces the same constraint structurally.
+
+### fork_session vs Parallel Agent Invocation
+
+| | fork_session | Parallel Agent Invocation |
+|---|---|---|
+| Purpose | Divergent exploration from shared baseline | Independent tasks running simultaneously |
+| Use when | Trying different strategies from same starting point | Tasks are independent, want speed |
+| Java equivalent | N/A | CompletableFuture |
+
+### Narrow Decomposition Failure Pattern
+```
+WRONG: ["solar", "wind"]           ← misses geothermal, tidal, biomass
+CORRECT: ["solar", "wind", "geothermal", "tidal", "biomass", "fusion"]
+```
+Root cause is always coordinator decomposition — not subagents.
 
 ---
 
-## Coverage Evaluation
+## Configuration
 
-The coordinator asks Claude to evaluate coverage and return structured JSON:
-
-```json
-{
-  "wellCovered": ["solar", "wind"],
-  "partiallyCovered": ["geothermal"],
-  "missing": ["tidal", "biomass", "fusion"],
-  "coverageComplete": false
-}
+```properties
+# application.properties
+claude.api.key=sk-ant-your-key-here
+research.coordinator.max-iterations=3
 ```
-
-This structured output drives the refinement decision — no guessing, no natural language parsing.
-
----
-
-## Narrow Decomposition — Exam Failure Pattern
-
-The exam specifically tests whether you recognise this failure:
-
-```
-Topic: "Renewable Energy Technologies"
-
-WRONG decomposition (too narrow):
-["solar", "wind"]  ← misses geothermal, tidal, biomass, fusion
-
-CORRECT decomposition (broad):
-["solar", "wind", "geothermal", "tidal", "biomass", "fusion", "hydrogen"]
-```
-
-**Diagnostic:** If the final report only covers solar and wind, the root cause is
-the **coordinator decomposition** — not the subagents. Subagents only research
-what they are assigned. This is the exact diagnostic the exam expects.
 
 ---
 
@@ -203,14 +248,7 @@ what they are assigned. This is the exact diagnostic the exam expects.
 ### Prerequisites
 - Java 17+
 - Maven
-- Anthropic API key (`sk-ant-...`) from [console.anthropic.com](https://console.anthropic.com)
-
-### Configuration
-
-Add your API key to `src/main/resources/application.properties`:
-```properties
-claude.api.key=sk-ant-your-key-here
-```
+- Anthropic API key from [console.anthropic.com](https://console.anthropic.com)
 
 ### Run
 ```bash
@@ -219,49 +257,7 @@ mvn spring-boot:run
 
 ---
 
-## Expected Output
-
-For topic `"renewable energy technologies"`:
-
-```
-Coverage gaps found: [tidal, biomass, fusion]
-Coverage complete after 1 refinements!
-
-=== FINAL RESEARCH REPORT ===
-
-Executive Summary:
-Renewable energy technologies encompass a diverse range of solutions...
-
-Key Findings:
-Solar: ...
-Wind: ...
-Geothermal: ...
-Tidal: ...
-Biomass: ...
-Fusion: ...
-
-Conclusion:
-...
-```
-
----
-
-## Key Exam Concepts Demonstrated
-
-| Exam Concept | Implementation |
-|---|---|
-| Hub-and-spoke architecture | `researchCoordinator` + private spokes |
-| Subagent isolation | Explicit context in every prompt |
-| Broad decomposition | Claude-driven dynamic subtopic generation |
-| Parallel spawning | `CompletableFuture` streams |
-| Iterative refinement | while loop with coverage evaluation |
-| Targeted re-delegation | Missing subtopics only |
-| Safety cap | `maxIterations = 3` |
-| Structured output | JSON coverage assessment |
-
----
-
-## Related Exam Domain
+## Related Exam Domains
 
 **Domain 1: Agentic Architecture & Orchestration — 27% of exam**
 
@@ -277,6 +273,6 @@ Task Statements covered:
 - Java 17
 - Spring Boot 3.2.4
 - CompletableFuture (parallel execution)
-- Jackson ObjectMapper (JSON parsing)
+- Jackson ObjectMapper (JSON parsing + serialization)
 - RestTemplate (synchronous HTTP)
 - Anthropic Claude API (`claude-sonnet-4-20250514`)

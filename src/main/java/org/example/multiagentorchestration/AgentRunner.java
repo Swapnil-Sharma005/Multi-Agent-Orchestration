@@ -1,6 +1,6 @@
 package org.example.multiagentorchestration;
 
-import org.example.multiagentorchestration.service.ResearchCoordinatorService;
+import org.example.multiagentorchestration.agentService.CoordinatorAgent;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
@@ -10,7 +10,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class AgentRunner implements CommandLineRunner {
 
     @Autowired
-    private ResearchCoordinatorService researchCoordinatorService;
+    private CoordinatorAgent coordinatorAgent;
 
     public static void main(String[] args) {
         SpringApplication.run(AgentRunner.class, args);
@@ -18,7 +18,7 @@ public class AgentRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        String result = researchCoordinatorService.researchCordinator("Impact of AI on healthcare");
+        String result = coordinatorAgent.researchCoordinator("Impact of AI on healthcare");
         System.out.println(result);
     }
 }
