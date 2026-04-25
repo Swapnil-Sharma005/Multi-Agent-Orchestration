@@ -1,0 +1,2 @@
+spring.application.name=Multi-Agent Orchestration
+claude.api.key=your-claude-api-key-here
